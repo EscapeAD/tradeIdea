@@ -4,3 +4,11 @@ spring:
   data:
     mongodb:
       uri: mongodb://localhost:27017/tradingdb
+
+
+futu:
+  api:
+    base-url: https://openapi.futunn.com
+    api-key: ${FUTU_API_KEY}
+    snapshot-endpoint: /futu-api/market-snapshot
+    polling-interval-seconds: 5
