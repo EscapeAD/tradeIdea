@@ -1,9 +1,9 @@
 package com.itsadamtse.tradeIdea.model;
 
-import java.util.List;
+import lombok.Data;
 
-public class FutuApiResponse
-{
+@Data
+public class FutuApiResponse {
     private S2C s2c;
 }
 

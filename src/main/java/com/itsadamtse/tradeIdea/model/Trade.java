@@ -4,12 +4,13 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import lombok.Data;
 import java.time.Instant;
+
 @Data
 @Document(collection = "trades")
 public class Trade {
     @Id
     private String id;
-    private String security;
+    private String symbol;  // Add this field
     private String name;
     private double lastPrice;
     private long volume;

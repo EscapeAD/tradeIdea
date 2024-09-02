@@ -8,7 +8,9 @@ spring:
 
 futu:
   api:
-    base-url: https://openapi.futunn.com
-    api-key: ${FUTU_API_KEY}
+    base-url: https://openapi.futunn.com  # Replace with the actual base URL
+    api-key: your-api-key-here  # Replace with your actual API key
     snapshot-endpoint: /futu-api/market-snapshot
-    polling-interval-seconds: 5
+    symbols:
+      - NVIDA
+    fetch-interval-ms: 300000  # 5 minutes

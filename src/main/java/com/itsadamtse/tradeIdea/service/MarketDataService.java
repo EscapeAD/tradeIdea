@@ -1,14 +1,17 @@
 package com.itsadamtse.tradeIdea.service;
 
+import com.itsadamtse.tradeIdea.configuration.FutuApiProperties;
 import com.itsadamtse.tradeIdea.model.FutuApiResponse;
+import com.itsadamtse.tradeIdea.model.Snapshot;
+import com.itsadamtse.tradeIdea.model.SnapshotBasicData;
 import com.itsadamtse.tradeIdea.model.Trade;
 import com.itsadamtse.tradeIdea.repository.TradeRepository;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -18,45 +21,47 @@ public class MarketDataService {
 
     private final TradeRepository tradeRepository;
     private final WebClient webClient;
-    private final String apiKey;
+    private final FutuApiProperties futuApiProperties;
 
     public MarketDataService(TradeRepository tradeRepository,
                              WebClient.Builder webClientBuilder,
-                             @Value("${futu.api.base-url}") String baseUrl,
-                             @Value("${futu.api.key}") String apiKey) {
+                             FutuApiProperties futuApiProperties) {
         this.tradeRepository = tradeRepository;
-        this.webClient = webClientBuilder.baseUrl(baseUrl).build();
-        this.apiKey = apiKey;
+        this.futuApiProperties = futuApiProperties;
+        this.webClient = webClientBuilder
+                .baseUrl(futuApiProperties.getBaseUrl())
+                .defaultHeader("Authorization", "Bearer " + futuApiProperties.getApiKey())
+                .build();
     }
 
-    public Flux<Trade> streamMarketData(String security) {
-        return Flux.interval(Duration.ofSeconds(5))
-                .flatMap(i -> fetchMarketSnapshot(security))
-                .flatMap(this::saveTrade);
+    @Scheduled(fixedRateString = "${futu.api.fetch-interval-ms}")
+    public void fetchAndStoreMarketData() {
+        Flux.fromIterable(futuApiProperties.getSymbols())
+                .flatMap(this::fetchMarketSnapshot)
+                .flatMap(this::saveTrade)
+                .subscribe(
+                        trade -> System.out.println("Saved trade for " + trade.getSymbol()),
+                        error -> System.err.println("Error fetching market data: " + error.getMessage())
+                );
     }
 
-    private Mono<Trade> fetchMarketSnapshot(String security) {
+    private Mono<Trade> fetchMarketSnapshot(String symbol) {
         return webClient.get()
                 .uri(uriBuilder -> uriBuilder
-                        .path("/futu-api/market-snapshot")
-                        .queryParam("security", security)
+                        .path(futuApiProperties.getSnapshotEndpoint())
+                        .queryParam("security", symbol)
                         .build())
-                .header("Authorization", "Bearer " + apiKey)
                 .retrieve()
                 .bodyToMono(FutuApiResponse.class)
-                .map(this::convertToTrade)
-                .onErrorResume(e -> {
-                    // Log error using a proper logging framework
-                    return Mono.empty();
-                });
+                .map(response -> convertToTrade(response, symbol));
     }
 
-    private Trade convertToTrade(FutuApiResponse response) {
-        Schedulers.Snapshot snapshot = response.getS2c().getSnapshotList().get(0);
-        SnapshotBasicData basicData = snapshot.getBasic();
+    private Trade convertToTrade(FutuApiResponse response, String symbol) {
+        // Assuming the response contains the data we need
+        SnapshotBasicData basicData = response.getS2c().getSnapshotList().get(0).getBasic();
 
         Trade trade = new Trade();
-        trade.setSecurity(basicData.getSecurity().getMarket() + "." + basicData.getSecurity().getCode());
+        trade.setSymbol(symbol);
         trade.setName(basicData.getName());
         trade.setLastPrice(basicData.getCurPrice());
         trade.setVolume(basicData.getVolume());
@@ -66,27 +71,23 @@ public class MarketDataService {
         trade.setLowPrice(basicData.getLowPrice());
         trade.setUpdateTime(Instant.ofEpochSecond(basicData.getUpdateTimestamp()));
 
-        // Handle additional data based on security type
-        switch (basicData.getType()) {
-            case 1: // Equity
-                if (snapshot.getEquityExData() != null) {
-                    trade.setIssuedShares(snapshot.getEquityExData().getIssuedShares());
-                    trade.setPeRatio(snapshot.getEquityExData().getPeRate());
-                }
-                break;
-            case 2: // Index
-                if (snapshot.getIndexExData() != null) {
-                    trade.setRaiseCount(snapshot.getIndexExData().getRaiseCount());
-                    trade.setFallCount(snapshot.getIndexExData().getFallCount());
-                }
-                break;
-            // Add cases for other security types as needed
-        }
+        // Add more fields as necessary
 
         return trade;
     }
 
     private Mono<Trade> saveTrade(Trade trade) {
         return tradeRepository.save(trade);
+    }
+
+   // market Data Trades
+    public Flux<Trade> getTradesBySymbol(String symbol) {
+        return tradeRepository.findBySymbol(symbol);
+    }
+
+    public Mono<Trade> getLatestTrade(String symbol) {
+        return tradeRepository.findBySymbol(symbol)
+                .sort((t1, t2) -> t2.getUpdateTime().compareTo(t1.getUpdateTime()))
+                .next();
     }
 }
